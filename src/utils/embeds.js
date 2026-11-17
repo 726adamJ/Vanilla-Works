@@ -18,9 +18,9 @@ function panelEmbed() {
     .setTitle('Vanilla Works | Public Relations Department')
     .setDescription(
       'Welcome to the **Vanilla Works Public Relations Department**.\n\n' +
-      'This panel provides staff with access to the department’s PR tools. Use the buttons below to submit promotional requests, record outreach activity, participate in department decisions and interact with official staff announcements.'
+      'Use the buttons below to submit promotional requests, log outreach activity, or request a server blacklist.'
     )
-    .setThumbnail('https://cdn.discordapp.com/embed/avatars/0.png'); // Placeholder, replace with brand logo if available
+    .setThumbnail('https://cdn.discordapp.com/embed/avatars/0.png');
 }
 
 function panelButtons() {
@@ -36,15 +36,10 @@ function panelButtons() {
       .setStyle(ButtonStyle.Success)
       .setEmoji('📋'),
     new ButtonBuilder()
-      .setCustomId('pr_department_polls')
-      .setLabel('Department Polls')
-      .setStyle(ButtonStyle.Secondary)
-      .setEmoji('📊'),
-    new ButtonBuilder()
-      .setCustomId('pr_staff_posts')
-      .setLabel('Staff Posts')
-      .setStyle(ButtonStyle.Secondary)
-      .setEmoji('📢')
+      .setCustomId('pr_request_blacklist')
+      .setLabel('Request a Blacklist')
+      .setStyle(ButtonStyle.Danger)
+      .setEmoji('⛔')
   );
 }
 

@@ -25,11 +25,16 @@ function generateEmbedId() {
   return generateId('EMB');
 }
 
+function generateBlacklistId() {
+  return generateId('BL');
+}
+
 module.exports = {
   generateId,
   generateRequestId,
   generateLogId,
   generatePollId,
   generatePostId,
-  generateEmbedId
+  generateEmbedId,
+  generateBlacklistId
 };

@@ -52,6 +52,23 @@ db.exec(`
     message_id TEXT
   );
 
+  CREATE TABLE IF NOT EXISTS blacklist_requests (
+    id TEXT PRIMARY KEY,
+    submitter_id TEXT NOT NULL,
+    server_name TEXT NOT NULL,
+    server_link TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    incident_date TEXT NOT NULL,
+    evidence_urls TEXT, -- JSON array of image/video URLs
+    status TEXT NOT NULL DEFAULT 'pending', -- pending | approved | rejected
+    manager_id TEXT,
+    rejection_reason TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    processed_at TEXT,
+    message_id TEXT,
+    channel_id TEXT
+  );
+
   CREATE TABLE IF NOT EXISTS polls (
     id TEXT PRIMARY KEY,
     question TEXT NOT NULL,
