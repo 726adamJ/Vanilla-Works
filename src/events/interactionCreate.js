@@ -1,16 +1,15 @@
 const { MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, EmbedBuilder } = require('discord.js');
 const { hasStaffRole, hasManagementRole, canApproveRequests } = require('../utils/permissions');
 
-// In-memory temporary storage for outreach evidence collection
-const tempOutreach = new Map();
+// Temporary storage for multi-step flows (outreach + blacklist evidence)
+const tempData = new Map();
 
 module.exports = {
   name: 'interactionCreate',
   async execute(interaction, client) {
-    if (!client.tempOutreach) client.tempOutreach = tempOutreach;
+    if (!client.tempData) client.tempData = tempData;
 
     try {
-      // Slash commands
       if (interaction.isChatInputCommand()) {
         const command = client.commands.get(interaction.commandName);
         if (!command) return;
@@ -18,11 +17,10 @@ module.exports = {
         return;
       }
 
-      // Buttons
       if (interaction.isButton()) {
         const id = interaction.customId;
 
-        // ===== Central Panel buttons =====
+        // ===== PANEL BUTTONS =====
         if (id === 'pr_post_request') {
           if (!hasStaffRole(interaction.member)) {
             return interaction.reply({ content: 'You do not have permission to use this feature.', flags: MessageFlags.Ephemeral });
@@ -40,7 +38,6 @@ module.exports = {
             .setCustomId('modal_mutual_giveaway')
             .setTitle('Mutual Giveaway Request');
 
-          // Discord modals max 5 components. Include the 5 most critical fields.
           const fields = [
             { id: 'invite', label: 'Discord Server Invite', style: TextInputStyle.Short },
             { id: 'prize', label: 'Their Prize', style: TextInputStyle.Short },
@@ -51,11 +48,7 @@ module.exports = {
 
           modal.addComponents(...fields.map(f =>
             new ActionRowBuilder().addComponents(
-              new TextInputBuilder()
-                .setCustomId(f.id)
-                .setLabel(f.label)
-                .setStyle(f.style)
-                .setRequired(true)
+              new TextInputBuilder().setCustomId(f.id).setLabel(f.label).setStyle(f.style).setRequired(true)
             )
           ));
           return interaction.showModal(modal);
@@ -67,22 +60,15 @@ module.exports = {
             .setTitle('Partnership Request');
 
           modal.addComponents(
-            new ActionRowBuilder().addComponents(
-              new TextInputBuilder().setCustomId('server_name').setLabel('Server Name').setStyle(TextInputStyle.Short).setRequired(true)
-            ),
-            new ActionRowBuilder().addComponents(
-              new TextInputBuilder().setCustomId('our_ping').setLabel('Our Ping').setStyle(TextInputStyle.Short).setRequired(true)
-            ),
-            new ActionRowBuilder().addComponents(
-              new TextInputBuilder().setCustomId('their_ping').setLabel('Their Ping').setStyle(TextInputStyle.Short).setRequired(true)
-            ),
-            new ActionRowBuilder().addComponents(
-              new TextInputBuilder().setCustomId('partners_ad').setLabel('Partners Ad').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(4000)
-            )
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('server_name').setLabel('Server Name').setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('our_ping').setLabel('Our Ping').setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('their_ping').setLabel('Their Ping').setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('partners_ad').setLabel('Partners Ad').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(4000))
           );
           return interaction.showModal(modal);
         }
 
+        // ===== LOG OUTREACH =====
         if (id === 'pr_log_outreach') {
           if (!hasStaffRole(interaction.member)) {
             return interaction.reply({ content: 'You do not have permission to use this feature.', flags: MessageFlags.Ephemeral });
@@ -92,104 +78,100 @@ module.exports = {
             .setTitle('Log Outreach');
 
           modal.addComponents(
-            new ActionRowBuilder().addComponents(
-              new TextInputBuilder().setCustomId('server_invite').setLabel('Server Invite').setStyle(TextInputStyle.Short).setRequired(true)
-            ),
-            new ActionRowBuilder().addComponents(
-              new TextInputBuilder().setCustomId('pings').setLabel('Pings Used').setStyle(TextInputStyle.Short).setRequired(true)
-            ),
-            new ActionRowBuilder().addComponents(
-              new TextInputBuilder().setCustomId('type').setLabel('Type (Mutual or Partner)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Mutual or Partner')
-            )
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('server_invite').setLabel('Server Invite').setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('pings').setLabel('Pings Used').setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('type').setLabel('Type (Mutual or Partner)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Mutual or Partner')),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('evidence_link').setLabel('Evidence Link (optional image/video URL)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('https://...'))
           );
           return interaction.showModal(modal);
         }
 
-        if (id === 'pr_department_polls') {
-          return interaction.reply({
-            content: 'Use `/poll create` (management only) to create a new department poll.\nActive polls appear in the designated poll channel.',
-            flags: MessageFlags.Ephemeral
-          });
+        // ===== REQUEST A BLACKLIST =====
+        if (id === 'pr_request_blacklist') {
+          if (!hasStaffRole(interaction.member)) {
+            return interaction.reply({ content: 'You do not have permission to use this feature.', flags: MessageFlags.Ephemeral });
+          }
+          const modal = new ModalBuilder()
+            .setCustomId('modal_blacklist')
+            .setTitle('Request a Blacklist');
+
+          modal.addComponents(
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('server_name').setLabel('Server Name').setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('server_link').setLabel('Server Link / Invite').setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel('Reason for requesting blacklist').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('incident_date').setLabel('Date this incident occurred').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('e.g. 2026-11-15 or Nov 15 2026')),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('evidence_link').setLabel('Evidence Link (optional)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Image or video URL'))
+          );
+          return interaction.showModal(modal);
         }
 
-        if (id === 'pr_staff_posts') {
-          return interaction.reply({
-            content: 'Use `/post create` to publish a staff post with caption, photo and optional ping.',
-            flags: MessageFlags.Ephemeral
-          });
-        }
-
-        // ===== Approval / Rejection =====
+        // ===== APPROVE / REJECT (normal requests) =====
         if (id.startsWith('approve_req_')) {
           return handleApprove(interaction, id.replace('approve_req_', ''), client);
         }
-
         if (id.startsWith('reject_req_')) {
           const reqId = id.replace('reject_req_', '');
-          const modal = new ModalBuilder()
-            .setCustomId(`modal_reject_${reqId}`)
-            .setTitle('Rejection Reason');
+          const modal = new ModalBuilder().setCustomId(`modal_reject_${reqId}`).setTitle('Rejection Reason');
           modal.addComponents(
             new ActionRowBuilder().addComponents(
-              new TextInputBuilder()
-                .setCustomId('reason')
-                .setLabel('Reason for rejection (required)')
-                .setStyle(TextInputStyle.Paragraph)
-                .setRequired(true)
-                .setMaxLength(1000)
+              new TextInputBuilder().setCustomId('reason').setLabel('Reason for rejection (required)').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000)
             )
           );
           return interaction.showModal(modal);
         }
 
-        // ===== Like button =====
-        if (id.startsWith('like_post_')) {
-          return handleLike(interaction, id.replace('like_post_', ''), client);
+        // ===== APPROVE / REJECT BLACKLIST =====
+        if (id.startsWith('approve_bl_')) {
+          return handleBlacklistApprove(interaction, id.replace('approve_bl_', ''), client);
+        }
+        if (id.startsWith('reject_bl_')) {
+          const blId = id.replace('reject_bl_', '');
+          const modal = new ModalBuilder().setCustomId(`modal_reject_bl_${blId}`).setTitle('Blacklist Rejection Reason');
+          modal.addComponents(
+            new ActionRowBuilder().addComponents(
+              new TextInputBuilder().setCustomId('reason').setLabel('Reason for rejection').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000)
+            )
+          );
+          return interaction.showModal(modal);
         }
 
-        // ===== Poll vote buttons =====
+        // ===== Like / Poll / Embed (kept for compatibility) =====
+        if (id.startsWith('like_post_')) return handleLike(interaction, id.replace('like_post_', ''), client);
         if (id.startsWith('poll_vote_')) {
           const parts = id.split('_');
-          const pollId = parts[2];
-          const optionIndex = parseInt(parts[3], 10);
-          return handlePollVote(interaction, pollId, optionIndex, client);
+          return handlePollVote(interaction, parts[2], parseInt(parts[3], 10), client);
         }
-
-        // ===== Embed publish / cancel =====
-        if (id.startsWith('embed_publish_')) {
-          return handleEmbedPublish(interaction, id.replace('embed_publish_', ''), client);
-        }
+        if (id.startsWith('embed_publish_')) return handleEmbedPublish(interaction, id.replace('embed_publish_', ''), client);
         if (id.startsWith('embed_cancel_')) {
-          const draftId = id.replace('embed_cancel_', '');
-          try {
-            const { draftStore } = require('../commands/embed');
-            draftStore.delete(draftId);
-          } catch {}
+          try { require('../commands/embed').draftStore.delete(id.replace('embed_cancel_', '')); } catch {}
           return interaction.update({ content: 'Embed creation cancelled.', embeds: [], components: [] });
         }
 
-        // ===== Outreach evidence skip =====
+        // ===== Evidence collectors skip buttons =====
         if (id.startsWith('outreach_skip_')) {
           const userId = id.replace('outreach_skip_', '');
-          if (interaction.user.id !== userId) {
-            return interaction.reply({ content: 'This is not your submission.', flags: MessageFlags.Ephemeral });
-          }
+          if (interaction.user.id !== userId) return interaction.reply({ content: 'This is not your submission.', flags: MessageFlags.Ephemeral });
           return finalizeOutreach(interaction, userId, null, client);
+        }
+        if (id.startsWith('blacklist_skip_')) {
+          const userId = id.replace('blacklist_skip_', '');
+          if (interaction.user.id !== userId) return interaction.reply({ content: 'This is not your submission.', flags: MessageFlags.Ephemeral });
+          return finalizeBlacklist(interaction, userId, [], client);
         }
 
         return;
       }
 
-      // ===== Modals =====
+      // ===== MODALS =====
       if (interaction.isModalSubmit()) {
         const id = interaction.customId;
 
         if (id === 'modal_mutual_giveaway') return handleMutualSubmit(interaction, client);
         if (id === 'modal_partnership') return handlePartnershipSubmit(interaction, client);
         if (id === 'modal_outreach') return handleOutreachSubmit(interaction, client);
-        if (id.startsWith('modal_reject_')) {
-          return handleReject(interaction, id.replace('modal_reject_', ''), client);
-        }
+        if (id === 'modal_blacklist') return handleBlacklistSubmit(interaction, client);
+        if (id.startsWith('modal_reject_bl_')) return handleBlacklistReject(interaction, id.replace('modal_reject_bl_', ''), client);
+        if (id.startsWith('modal_reject_')) return handleReject(interaction, id.replace('modal_reject_', ''), client);
         return;
       }
 
@@ -205,7 +187,7 @@ module.exports = {
   }
 };
 
-// ==================== Handlers ====================
+// ==================== HANDLERS ====================
 
 async function handleMutualSubmit(interaction, client) {
   const { db, getConfig } = require('../database');
@@ -229,20 +211,14 @@ async function handleMutualSubmit(interaction, client) {
   const reqId = generateRequestId();
   const submitter = interaction.user;
 
-  db.prepare(`
-    INSERT INTO requests (id, type, submitter_id, status, data)
-    VALUES (?, 'mutual_giveaway', ?, 'pending', ?)
-  `).run(reqId, submitter.id, JSON.stringify(data));
+  db.prepare(`INSERT INTO requests (id, type, submitter_id, status, data) VALUES (?, 'mutual_giveaway', ?, 'pending', ?)`)\
+    .run(reqId, submitter.id, JSON.stringify(data));
 
   const approvalChannelId = getConfig('approval_channel');
-  if (!approvalChannelId) {
-    return interaction.reply({ content: 'Approval channel is not configured. Please contact an administrator.', flags: MessageFlags.Ephemeral });
-  }
+  if (!approvalChannelId) return interaction.reply({ content: 'Approval channel is not configured.', flags: MessageFlags.Ephemeral });
 
   const channel = await client.channels.fetch(approvalChannelId).catch(() => null);
-  if (!channel) {
-    return interaction.reply({ content: 'Could not find the approval channel.', flags: MessageFlags.Ephemeral });
-  }
+  if (!channel) return interaction.reply({ content: 'Could not find the approval channel.', flags: MessageFlags.Ephemeral });
 
   const embed = baseEmbed()
     .setColor(statusColor('pending'))
@@ -250,14 +226,13 @@ async function handleMutualSubmit(interaction, client) {
     .setDescription(`**Request ID:** \`${reqId}\`\n**Status:** Pending Approval`)
     .addFields(
       { name: 'Submitted by', value: `<@${submitter.id}> (${submitter.tag})`, inline: true },
-      { name: 'Server Invite', value: data.invite, inline: false },
+      { name: 'Server Invite', value: data.invite },
       { name: 'Their Prize', value: data.prize, inline: true },
       { name: 'Duration', value: data.duration, inline: true },
       { name: 'Winners', value: data.winners, inline: true },
       { name: 'Their Ping', value: data.their_ping, inline: true },
       { name: 'Our Ping', value: data.our_ping, inline: true }
-    )
-    .setTimestamp();
+    );
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`approve_req_${reqId}`).setLabel('Approve').setStyle(ButtonStyle.Success),
@@ -267,14 +242,8 @@ async function handleMutualSubmit(interaction, client) {
   const msg = await channel.send({ embeds: [embed], components: [row] });
   db.prepare(`UPDATE requests SET message_id = ?, channel_id = ? WHERE id = ?`).run(msg.id, channel.id, reqId);
 
-  await interaction.reply({
-    content: `Your Mutual Giveaway request has been submitted.\n**Reference ID:** \`${reqId}\`\nManagement has been notified.`,
-    flags: MessageFlags.Ephemeral
-  });
-
-  try {
-    await submitter.send(`Your Mutual Giveaway request (\`${reqId}\`) has been submitted and is pending approval.`);
-  } catch {}
+  await interaction.reply({ content: `Your Mutual Giveaway request has been submitted.\n**Reference ID:** \`${reqId}\``, flags: MessageFlags.Ephemeral });
+  try { await submitter.send(`Your Mutual Giveaway request (\`${reqId}\`) is pending approval.`); } catch {}
 }
 
 async function handlePartnershipSubmit(interaction, client) {
@@ -292,20 +261,14 @@ async function handlePartnershipSubmit(interaction, client) {
   const reqId = generateRequestId();
   const submitter = interaction.user;
 
-  db.prepare(`
-    INSERT INTO requests (id, type, submitter_id, status, data)
-    VALUES (?, 'partnership', ?, 'pending', ?)
-  `).run(reqId, submitter.id, JSON.stringify(data));
+  db.prepare(`INSERT INTO requests (id, type, submitter_id, status, data) VALUES (?, 'partnership', ?, 'pending', ?)`)\
+    .run(reqId, submitter.id, JSON.stringify(data));
 
   const approvalChannelId = getConfig('approval_channel');
-  if (!approvalChannelId) {
-    return interaction.reply({ content: 'Approval channel is not configured.', flags: MessageFlags.Ephemeral });
-  }
+  if (!approvalChannelId) return interaction.reply({ content: 'Approval channel is not configured.', flags: MessageFlags.Ephemeral });
 
   const channel = await client.channels.fetch(approvalChannelId).catch(() => null);
-  if (!channel) {
-    return interaction.reply({ content: 'Could not find the approval channel.', flags: MessageFlags.Ephemeral });
-  }
+  if (!channel) return interaction.reply({ content: 'Could not find the approval channel.', flags: MessageFlags.Ephemeral });
 
   const embed = baseEmbed()
     .setColor(statusColor('pending'))
@@ -316,9 +279,8 @@ async function handlePartnershipSubmit(interaction, client) {
       { name: 'Server Name', value: data.server_name, inline: true },
       { name: 'Our Ping', value: data.our_ping, inline: true },
       { name: 'Their Ping', value: data.their_ping, inline: true },
-      { name: 'Partners Ad', value: data.partners_ad.slice(0, 1024) || '—', inline: false }
-    )
-    .setTimestamp();
+      { name: 'Partners Ad', value: data.partners_ad.slice(0, 1024) || '—' }
+    );
 
   if (data.partners_ad.length > 1024) {
     embed.addFields({ name: 'Partners Ad (continued)', value: data.partners_ad.slice(1024, 2048) });
@@ -332,14 +294,8 @@ async function handlePartnershipSubmit(interaction, client) {
   const msg = await channel.send({ embeds: [embed], components: [row] });
   db.prepare(`UPDATE requests SET message_id = ?, channel_id = ? WHERE id = ?`).run(msg.id, channel.id, reqId);
 
-  await interaction.reply({
-    content: `Your Partnership request has been submitted.\n**Reference ID:** \`${reqId}\``,
-    flags: MessageFlags.Ephemeral
-  });
-
-  try {
-    await submitter.send(`Your Partnership request (\`${reqId}\`) has been submitted and is pending approval.`);
-  } catch {}
+  await interaction.reply({ content: `Your Partnership request has been submitted.\n**Reference ID:** \`${reqId}\``, flags: MessageFlags.Ephemeral });
+  try { await submitter.send(`Your Partnership request (\`${reqId}\`) is pending approval.`); } catch {}
 }
 
 async function handleApprove(interaction, reqId, client) {
@@ -352,12 +308,9 @@ async function handleApprove(interaction, reqId, client) {
 
   const req = db.prepare('SELECT * FROM requests WHERE id = ?').get(reqId);
   if (!req) return interaction.reply({ content: 'Request not found.', flags: MessageFlags.Ephemeral });
-  if (req.status !== 'pending') {
-    return interaction.reply({ content: `This request has already been ${req.status}.`, flags: MessageFlags.Ephemeral });
-  }
+  if (req.status !== 'pending') return interaction.reply({ content: `This request has already been ${req.status}.`, flags: MessageFlags.Ephemeral });
 
-  db.prepare(`UPDATE requests SET status = 'approved', manager_id = ?, processed_at = datetime('now') WHERE id = ?`)
-    .run(interaction.user.id, reqId);
+  db.prepare(`UPDATE requests SET status = 'approved', manager_id = ?, processed_at = datetime('now') WHERE id = ?`).run(interaction.user.id, reqId);
 
   try {
     const channel = await client.channels.fetch(req.channel_id);
@@ -366,8 +319,7 @@ async function handleApprove(interaction, reqId, client) {
     const embed = baseEmbed()
       .setColor(statusColor('approved'))
       .setTitle(req.type === 'mutual_giveaway' ? 'Mutual Giveaway Request' : 'Partnership Request')
-      .setDescription(`**Request ID:** \`${reqId}\`\n**Status:** ✅ Approved by <@${interaction.user.id}>`)
-      .setTimestamp();
+      .setDescription(`**Request ID:** \`${reqId}\`\n**Status:** ✅ Approved by <@${interaction.user.id}>`);
 
     if (req.type === 'mutual_giveaway') {
       embed.addFields(
@@ -386,13 +338,11 @@ async function handleApprove(interaction, reqId, client) {
     }
 
     await msg.edit({ embeds: [embed], components: [] });
-  } catch (e) {
-    console.error('Failed to update approval message', e);
-  }
+  } catch (e) { console.error(e); }
 
   try {
     const user = await client.users.fetch(req.submitter_id);
-    await user.send(`✅ Your request **${reqId}** has been **approved** by management.\nProcessed by: ${interaction.user.tag}`);
+    await user.send(`✅ Your request **${reqId}** has been **approved**.\nProcessed by: ${interaction.user.tag}`);
   } catch {}
 
   await interaction.reply({ content: `Request ${reqId} has been approved.`, flags: MessageFlags.Ephemeral });
@@ -409,12 +359,9 @@ async function handleReject(interaction, reqId, client) {
   const reason = interaction.fields.getTextInputValue('reason');
   const req = db.prepare('SELECT * FROM requests WHERE id = ?').get(reqId);
   if (!req) return interaction.reply({ content: 'Request not found.', flags: MessageFlags.Ephemeral });
-  if (req.status !== 'pending') {
-    return interaction.reply({ content: `This request has already been ${req.status}.`, flags: MessageFlags.Ephemeral });
-  }
+  if (req.status !== 'pending') return interaction.reply({ content: `This request has already been ${req.status}.`, flags: MessageFlags.Ephemeral });
 
-  db.prepare(`UPDATE requests SET status = 'rejected', manager_id = ?, rejection_reason = ?, processed_at = datetime('now') WHERE id = ?`)
-    .run(interaction.user.id, reason, reqId);
+  db.prepare(`UPDATE requests SET status = 'rejected', manager_id = ?, rejection_reason = ?, processed_at = datetime('now') WHERE id = ?`).run(interaction.user.id, reason, reqId);
 
   try {
     const channel = await client.channels.fetch(req.channel_id);
@@ -422,12 +369,9 @@ async function handleReject(interaction, reqId, client) {
     const embed = baseEmbed()
       .setColor(statusColor('rejected'))
       .setTitle(req.type === 'mutual_giveaway' ? 'Mutual Giveaway Request' : 'Partnership Request')
-      .setDescription(`**Request ID:** \`${reqId}\`\n**Status:** ❌ Rejected by <@${interaction.user.id}>\n**Reason:** ${reason}`)
-      .setTimestamp();
+      .setDescription(`**Request ID:** \`${reqId}\`\n**Status:** ❌ Rejected by <@${interaction.user.id}>\n**Reason:** ${reason}`);
     await msg.edit({ embeds: [embed], components: [] });
-  } catch (e) {
-    console.error(e);
-  }
+  } catch (e) { console.error(e); }
 
   try {
     const user = await client.users.fetch(req.submitter_id);
@@ -437,12 +381,16 @@ async function handleReject(interaction, reqId, client) {
   await interaction.reply({ content: `Request ${reqId} has been rejected.`, flags: MessageFlags.Ephemeral });
 }
 
+// ==================== OUTREACH ====================
+
 async function handleOutreachSubmit(interaction, client) {
   const { db } = require('../database');
 
   const serverInvite = interaction.fields.getTextInputValue('server_invite');
   const pings = interaction.fields.getTextInputValue('pings');
   let type = interaction.fields.getTextInputValue('type').trim();
+  const evidenceLink = interaction.fields.getTextInputValue('evidence_link')?.trim() || null;
+
   if (!['Mutual', 'Partner'].includes(type)) {
     type = type.toLowerCase().includes('partner') ? 'Partner' : 'Mutual';
   }
@@ -452,47 +400,49 @@ async function handleOutreachSubmit(interaction, client) {
 
   if (!assignment) {
     return interaction.reply({
-      content: 'Your outreach logging setup is incomplete. Please ask an administrator to run `/staff log setup` for you.',
+      content: 'Your outreach logging setup is incomplete. Ask an administrator to run `/staff log setup` for you.',
       flags: MessageFlags.Ephemeral
     });
   }
 
-  // Store temporarily and ask for evidence
-  client.tempOutreach.set(userId, {
+  // If they already provided a link, finalize immediately
+  if (evidenceLink) {
+    client.tempData.set(userId, { serverInvite, pings, type, threadId: assignment.thread_id });
+    return finalizeOutreach(interaction, userId, evidenceLink, client);
+  }
+
+  // Otherwise offer to upload an image or skip
+  client.tempData.set(userId, {
     serverInvite,
     pings,
     type,
     threadId: assignment.thread_id,
-    expires: Date.now() + 60 * 1000
+    expires: Date.now() + 90 * 1000
   });
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`outreach_skip_${userId}`)
-      .setLabel('Skip Evidence')
-      .setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId(`outreach_skip_${userId}`).setLabel('Skip Evidence').setStyle(ButtonStyle.Secondary)
   );
 
   await interaction.reply({
-    content: 'Please **upload the photographic evidence** (image) as a reply to this message within **60 seconds**, or click **Skip Evidence**.',
+    content: '**Optional Evidence**\nUpload an image as a reply to this message within 90 seconds, or click **Skip Evidence**.',
     components: [row],
     flags: MessageFlags.Ephemeral
   });
 
-  // Collector for image
   const filter = m => m.author.id === userId && m.attachments.size > 0;
-  const collector = interaction.channel.createMessageCollector({ filter, time: 60000, max: 1 });
+  const collector = interaction.channel.createMessageCollector({ filter, time: 90000, max: 1 });
 
   collector.on('collect', async (msg) => {
     const attachment = msg.attachments.first();
-    const evidenceUrl = attachment && attachment.contentType?.startsWith('image/') ? attachment.url : null;
-    await finalizeOutreach(interaction, userId, evidenceUrl, client);
+    const url = attachment && (attachment.contentType?.startsWith('image/') || attachment.contentType?.startsWith('video/'))
+      ? attachment.url : null;
+    await finalizeOutreach(interaction, userId, url, client);
     try { await msg.delete(); } catch {}
   });
 
   collector.on('end', async (collected) => {
-    if (collected.size === 0 && client.tempOutreach.has(userId)) {
-      // Timed out – still finalize without evidence if not already done
+    if (collected.size === 0 && client.tempData.has(userId)) {
       await finalizeOutreach(interaction, userId, null, client);
     }
   });
@@ -503,16 +453,14 @@ async function finalizeOutreach(interaction, userId, evidenceUrl, client) {
   const { generateLogId } = require('../utils/ids');
   const { baseEmbed } = require('../utils/embeds');
 
-  const temp = client.tempOutreach.get(userId);
+  const temp = client.tempData.get(userId);
   if (!temp) return;
-  client.tempOutreach.delete(userId);
+  client.tempData.delete(userId);
 
   const logId = generateLogId();
   const thread = await client.channels.fetch(temp.threadId).catch(() => null);
   if (!thread) {
-    try {
-      await interaction.followUp({ content: 'Could not find your assigned thread. Please contact management.', flags: MessageFlags.Ephemeral });
-    } catch {}
+    try { await interaction.followUp({ content: 'Could not find your assigned thread.', flags: MessageFlags.Ephemeral }); } catch {}
     return;
   }
 
@@ -524,12 +472,9 @@ async function finalizeOutreach(interaction, userId, evidenceUrl, client) {
       { name: 'Type', value: temp.type, inline: true },
       { name: 'Server Invite', value: temp.serverInvite },
       { name: 'Pings Used', value: temp.pings }
-    )
-    .setTimestamp();
+    );
 
-  if (evidenceUrl) {
-    embed.setImage(evidenceUrl);
-  }
+  if (evidenceUrl) embed.setImage(evidenceUrl);
 
   const notifyRole = getConfig('outreach_ping_role');
   const content = notifyRole ? `<@&${notifyRole}>` : null;
@@ -542,24 +487,211 @@ async function finalizeOutreach(interaction, userId, evidenceUrl, client) {
   `).run(logId, userId, temp.serverInvite, temp.pings, temp.type, evidenceUrl, temp.threadId, msg.id);
 
   try {
-    const user = await client.users.fetch(userId);
-    await user.send(`Your outreach log **${logId}** has been recorded successfully.`);
-  } catch {}
-
-  try {
     await interaction.editReply({ content: `Outreach log **${logId}** recorded successfully.`, components: [] });
   } catch {
-    try {
-      await interaction.followUp({ content: `Outreach log **${logId}** recorded successfully.`, flags: MessageFlags.Ephemeral });
-    } catch {}
+    try { await interaction.followUp({ content: `Outreach log **${logId}** recorded successfully.`, flags: MessageFlags.Ephemeral }); } catch {}
   }
 }
 
+// ==================== BLACKLIST ====================
+
+async function handleBlacklistSubmit(interaction, client) {
+  const serverName = interaction.fields.getTextInputValue('server_name');
+  const serverLink = interaction.fields.getTextInputValue('server_link');
+  const reason = interaction.fields.getTextInputValue('reason');
+  const incidentDate = interaction.fields.getTextInputValue('incident_date');
+  const evidenceLink = interaction.fields.getTextInputValue('evidence_link')?.trim() || null;
+
+  const userId = interaction.user.id;
+
+  client.tempData.set(userId, {
+    type: 'blacklist',
+    serverName,
+    serverLink,
+    reason,
+    incidentDate,
+    evidence: evidenceLink ? [evidenceLink] : [],
+    expires: Date.now() + 120 * 1000
+  });
+
+  // If they already gave a link, we can still offer more attachments
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`blacklist_skip_${userId}`).setLabel('Submit Now (no more evidence)').setStyle(ButtonStyle.Success)
+  );
+
+  await interaction.reply({
+    content: '**Evidence (Images / Videos)**\nYou can upload images or videos as replies to this message (up to 2 minutes).\nClick the button when you are done, or if you already provided a link.',
+    components: [row],
+    flags: MessageFlags.Ephemeral
+  });
+
+  const filter = m => m.author.id === userId && m.attachments.size > 0;
+  const collector = interaction.channel.createMessageCollector({ filter, time: 120000 });
+
+  collector.on('collect', async (msg) => {
+    const temp = client.tempData.get(userId);
+    if (!temp) return;
+
+    for (const att of msg.attachments.values()) {
+      if (att.contentType?.startsWith('image/') || att.contentType?.startsWith('video/')) {
+        temp.evidence.push(att.url);
+      }
+    }
+    client.tempData.set(userId, temp);
+
+    try { await msg.react('✅'); } catch {}
+  });
+
+  collector.on('end', async () => {
+    // Auto-finalize if they never clicked the button
+    if (client.tempData.has(userId)) {
+      await finalizeBlacklist(interaction, userId, client.tempData.get(userId).evidence, client);
+    }
+  });
+}
+
+async function finalizeBlacklist(interaction, userId, extraEvidence, client) {
+  const { db, getConfig } = require('../database');
+  const { generateBlacklistId } = require('../utils/ids');
+  const { baseEmbed, statusColor } = require('../utils/embeds');
+
+  const temp = client.tempData.get(userId);
+  if (!temp || temp.type !== 'blacklist') return;
+  client.tempData.delete(userId);
+
+  const evidence = [...(temp.evidence || []), ...(extraEvidence || [])];
+  const uniqueEvidence = [...new Set(evidence.filter(Boolean))];
+
+  const blId = generateBlacklistId();
+
+  db.prepare(`
+    INSERT INTO blacklist_requests (id, submitter_id, server_name, server_link, reason, incident_date, evidence_urls, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+  `).run(blId, userId, temp.serverName, temp.serverLink, temp.reason, temp.incidentDate, JSON.stringify(uniqueEvidence));
+
+  const approvalChannelId = getConfig('approval_channel');
+  if (!approvalChannelId) {
+    try { await interaction.followUp({ content: 'Approval channel is not configured.', flags: MessageFlags.Ephemeral }); } catch {}
+    return;
+  }
+
+  const channel = await client.channels.fetch(approvalChannelId).catch(() => null);
+  if (!channel) return;
+
+  const embed = baseEmbed()
+    .setColor(statusColor('pending'))
+    .setTitle('⛔ Blacklist Request')
+    .setDescription(`**Request ID:** \`${blId}\`\n**Status:** Pending Review`)
+    .addFields(
+      { name: 'Submitted by', value: `<@${userId}>`, inline: true },
+      { name: 'Server Name', value: temp.serverName, inline: true },
+      { name: 'Server Link', value: temp.serverLink },
+      { name: 'Incident Date', value: temp.incidentDate, inline: true },
+      { name: 'Reason', value: temp.reason.slice(0, 1024) }
+    );
+
+  if (uniqueEvidence.length > 0) {
+    embed.addFields({ name: 'Evidence', value: uniqueEvidence.map((u, i) => `[Evidence ${i + 1}](${u})`).join('\n').slice(0, 1024) });
+    // Show first image if available
+    const firstImage = uniqueEvidence.find(u => /\.(png|jpg|jpeg|gif|webp)/i.test(u) || u.includes('media.discordapp'));
+    if (firstImage) embed.setImage(firstImage);
+  }
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`approve_bl_${blId}`).setLabel('Approve Blacklist').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`reject_bl_${blId}`).setLabel('Reject').setStyle(ButtonStyle.Secondary)
+  );
+
+  const msg = await channel.send({ embeds: [embed], components: [row] });
+  db.prepare(`UPDATE blacklist_requests SET message_id = ?, channel_id = ? WHERE id = ?`).run(msg.id, channel.id, blId);
+
+  try {
+    await interaction.editReply({ content: `Blacklist request **${blId}** has been submitted for review.`, components: [] });
+  } catch {
+    try { await interaction.followUp({ content: `Blacklist request **${blId}** has been submitted for review.`, flags: MessageFlags.Ephemeral }); } catch {}
+  }
+
+  try {
+    const user = await client.users.fetch(userId);
+    await user.send(`Your blacklist request (\`${blId}\`) for **${temp.serverName}** has been submitted and is pending review.`);
+  } catch {}
+}
+
+async function handleBlacklistApprove(interaction, blId, client) {
+  const { db } = require('../database');
+  const { baseEmbed, statusColor } = require('../utils/embeds');
+
+  if (!canApproveRequests(interaction.member)) {
+    return interaction.reply({ content: 'Only management can approve blacklist requests.', flags: MessageFlags.Ephemeral });
+  }
+
+  const req = db.prepare('SELECT * FROM blacklist_requests WHERE id = ?').get(blId);
+  if (!req) return interaction.reply({ content: 'Blacklist request not found.', flags: MessageFlags.Ephemeral });
+  if (req.status !== 'pending') return interaction.reply({ content: `This request has already been ${req.status}.`, flags: MessageFlags.Ephemeral });
+
+  db.prepare(`UPDATE blacklist_requests SET status = 'approved', manager_id = ?, processed_at = datetime('now') WHERE id = ?`).run(interaction.user.id, blId);
+
+  try {
+    const channel = await client.channels.fetch(req.channel_id);
+    const msg = await channel.messages.fetch(req.message_id);
+    const embed = baseEmbed()
+      .setColor(statusColor('approved'))
+      .setTitle('⛔ Blacklist Request — APPROVED')
+      .setDescription(`**Request ID:** \`${blId}\`\n**Status:** ✅ Approved by <@${interaction.user.id}>`)
+      .addFields(
+        { name: 'Server Name', value: req.server_name },
+        { name: 'Server Link', value: req.server_link },
+        { name: 'Reason', value: req.reason.slice(0, 1024) }
+      );
+    await msg.edit({ embeds: [embed], components: [] });
+  } catch (e) { console.error(e); }
+
+  try {
+    const user = await client.users.fetch(req.submitter_id);
+    await user.send(`✅ Your blacklist request **${blId}** for **${req.server_name}** has been **approved**.`);
+  } catch {}
+
+  await interaction.reply({ content: `Blacklist request ${blId} has been approved.`, flags: MessageFlags.Ephemeral });
+}
+
+async function handleBlacklistReject(interaction, blId, client) {
+  const { db } = require('../database');
+  const { baseEmbed, statusColor } = require('../utils/embeds');
+
+  if (!canApproveRequests(interaction.member)) {
+    return interaction.reply({ content: 'Only management can reject blacklist requests.', flags: MessageFlags.Ephemeral });
+  }
+
+  const reason = interaction.fields.getTextInputValue('reason');
+  const req = db.prepare('SELECT * FROM blacklist_requests WHERE id = ?').get(blId);
+  if (!req) return interaction.reply({ content: 'Blacklist request not found.', flags: MessageFlags.Ephemeral });
+  if (req.status !== 'pending') return interaction.reply({ content: `This request has already been ${req.status}.`, flags: MessageFlags.Ephemeral });
+
+  db.prepare(`UPDATE blacklist_requests SET status = 'rejected', manager_id = ?, rejection_reason = ?, processed_at = datetime('now') WHERE id = ?`).run(interaction.user.id, reason, blId);
+
+  try {
+    const channel = await client.channels.fetch(req.channel_id);
+    const msg = await channel.messages.fetch(req.message_id);
+    const embed = baseEmbed()
+      .setColor(statusColor('rejected'))
+      .setTitle('⛔ Blacklist Request — REJECTED')
+      .setDescription(`**Request ID:** \`${blId}\`\n**Status:** ❌ Rejected by <@${interaction.user.id}>\n**Reason:** ${reason}`);
+    await msg.edit({ embeds: [embed], components: [] });
+  } catch (e) { console.error(e); }
+
+  try {
+    const user = await client.users.fetch(req.submitter_id);
+    await user.send(`❌ Your blacklist request **${blId}** for **${req.server_name}** has been **rejected**.\n**Reason:** ${reason}`);
+  } catch {}
+
+  await interaction.reply({ content: `Blacklist request ${blId} has been rejected.`, flags: MessageFlags.Ephemeral });
+}
+
+// ==================== KEPT FOR COMPATIBILITY ====================
+
 async function handleLike(interaction, postId, client) {
   const { db } = require('../database');
-
   const existing = db.prepare('SELECT 1 FROM post_likes WHERE post_id = ? AND user_id = ?').get(postId, interaction.user.id);
-
   if (existing) {
     db.prepare('DELETE FROM post_likes WHERE post_id = ? AND user_id = ?').run(postId, interaction.user.id);
     db.prepare('UPDATE posts SET likes = likes - 1 WHERE id = ?').run(postId);
@@ -567,15 +699,10 @@ async function handleLike(interaction, postId, client) {
     db.prepare('INSERT INTO post_likes (post_id, user_id) VALUES (?, ?)').run(postId, interaction.user.id);
     db.prepare('UPDATE posts SET likes = likes + 1 WHERE id = ?').run(postId);
   }
-
   const post = db.prepare('SELECT likes FROM posts WHERE id = ?').get(postId);
   const likes = post ? post.likes : 0;
-
   const newRow = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`like_post_${postId}`)
-      .setLabel(`❤️ ${likes} Likes`)
-      .setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId(`like_post_${postId}`).setLabel(`❤️ ${likes} Likes`).setStyle(ButtonStyle.Secondary)
   );
   await interaction.update({ components: [newRow] });
 }
@@ -590,9 +717,7 @@ async function handlePollVote(interaction, pollId, optionIndex, client) {
   }
 
   const multi = !!poll.multi;
-  if (!multi) {
-    db.prepare('DELETE FROM poll_votes WHERE poll_id = ? AND user_id = ?').run(pollId, interaction.user.id);
-  }
+  if (!multi) db.prepare('DELETE FROM poll_votes WHERE poll_id = ? AND user_id = ?').run(pollId, interaction.user.id);
 
   const already = db.prepare('SELECT 1 FROM poll_votes WHERE poll_id = ? AND user_id = ? AND option_index = ?').get(pollId, interaction.user.id, optionIndex);
   if (already && multi) {
@@ -601,7 +726,6 @@ async function handlePollVote(interaction, pollId, optionIndex, client) {
     db.prepare('INSERT INTO poll_votes (poll_id, user_id, option_index) VALUES (?, ?, ?)').run(pollId, interaction.user.id, optionIndex);
   }
 
-  // Update embed with live results
   try {
     const options = JSON.parse(poll.options || '[]');
     const votes = db.prepare('SELECT option_index, COUNT(*) as count FROM poll_votes WHERE poll_id = ? GROUP BY option_index').all(pollId);
@@ -619,34 +743,28 @@ async function handlePollVote(interaction, pollId, optionIndex, client) {
       .setTitle('📊 Department Poll')
       .setDescription(`**${poll.question}**\n\n${poll.description || ''}`)
       .addFields(
-        { name: 'Current Results', value: results || 'No votes yet', inline: false },
+        { name: 'Current Results', value: results || 'No votes yet' },
         { name: 'Total Votes', value: String(total), inline: true },
         { name: 'Poll ID', value: `\`${pollId}\``, inline: true }
-      )
-      .setFooter({ text: `Created by management • Ends <t:${Math.floor(new Date(poll.ends_at).getTime() / 1000)}:R>` });
+      );
 
     await interaction.message.edit({ embeds: [embed] });
-  } catch (e) {
-    console.error('Failed to update poll embed', e);
-  }
+  } catch (e) { console.error(e); }
 
   await interaction.reply({ content: 'Your vote has been recorded.', flags: MessageFlags.Ephemeral });
 }
 
 async function handleEmbedPublish(interaction, draftId, client) {
   let draftStore;
-  try {
-    ({ draftStore } = require('../commands/embed'));
-  } catch {
+  try { ({ draftStore } = require('../commands/embed')); } catch {
     return interaction.update({ content: 'Draft system unavailable.', embeds: [], components: [] });
   }
 
   const draft = draftStore.get(draftId);
   if (!draft || draft.expires < Date.now()) {
     draftStore.delete(draftId);
-    return interaction.update({ content: 'This draft has expired. Please create a new embed.', embeds: [], components: [] });
+    return interaction.update({ content: 'This draft has expired.', embeds: [], components: [] });
   }
-
   if (draft.creatorId !== interaction.user.id) {
     return interaction.reply({ content: 'This is not your draft.', flags: MessageFlags.Ephemeral });
   }
@@ -655,10 +773,7 @@ async function handleEmbedPublish(interaction, draftId, client) {
   const { db } = require('../database');
 
   const d = draft.embedData;
-  const embed = new EmbedBuilder()
-    .setColor(d.color || 0x9B59B6)
-    .setTimestamp();
-
+  const embed = new EmbedBuilder().setColor(d.color || 0x9B59B6).setTimestamp();
   if (d.title) embed.setTitle(d.title);
   if (d.description) embed.setDescription(d.description);
   if (d.image) embed.setImage(d.image);
@@ -667,24 +782,15 @@ async function handleEmbedPublish(interaction, draftId, client) {
   if (d.author) embed.setAuthor({ name: d.author });
 
   const channel = await client.channels.fetch(draft.channelId).catch(() => null);
-  if (!channel) {
-    return interaction.update({ content: 'Destination channel no longer available.', embeds: [], components: [] });
-  }
+  if (!channel) return interaction.update({ content: 'Channel no longer available.', embeds: [], components: [] });
 
   const content = d.ping ? (d.ping.startsWith('<') ? d.ping : `<@&${d.ping}>`) : undefined;
   const msg = await channel.send({ content: content || undefined, embeds: [embed] });
 
   const embedId = generateEmbedId();
-  db.prepare(`
-    INSERT INTO custom_embeds (id, creator_id, channel_id, message_id, data)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(embedId, interaction.user.id, channel.id, msg.id, JSON.stringify(d));
+  db.prepare(`INSERT INTO custom_embeds (id, creator_id, channel_id, message_id, data) VALUES (?, ?, ?, ?, ?)`)\
+    .run(embedId, interaction.user.id, channel.id, msg.id, JSON.stringify(d));
 
   draftStore.delete(draftId);
-
-  await interaction.update({
-    content: `Embed published successfully to <#${channel.id}>.\n**Embed ID:** \`${embedId}\``,
-    embeds: [],
-    components: []
-  });
+  await interaction.update({ content: `Embed published to <#${channel.id}>.\n**Embed ID:** \`${embedId}\``, embeds: [], components: [] });
 }
