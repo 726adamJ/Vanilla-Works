@@ -18,18 +18,17 @@ module.exports = {
             .addChoices(
               { name: 'Approval Channel', value: 'approval_channel' },
               { name: 'Blacklist Channel', value: 'blacklist_channel' },
+              { name: 'Outreach Log Channel', value: 'outreach_channel' },
               { name: 'Panel Channel', value: 'panel_channel' },
-              { name: 'Poll Channel', value: 'poll_channel' },
-              { name: 'Staff Post Channel', value: 'staff_post_channel' },
-              { name: 'Outreach Notification Role', value: 'outreach_ping_role' },
+              { name: 'Request Ping Role', value: 'request_ping_role' },
+              { name: 'Outreach Ping Role', value: 'outreach_ping_role' },
+              { name: 'Blacklist Ping Role', value: 'blacklist_ping_role' },
               { name: 'Management Roles', value: 'management_roles' },
-              { name: 'Staff Roles', value: 'staff_roles' },
-              { name: 'Post Creation Roles', value: 'post_roles' },
-              { name: 'Embed Creation Roles', value: 'embed_roles' }
+              { name: 'Staff Roles', value: 'staff_roles' }
             )
         )
         .addChannelOption(o => o.setName('channel').setDescription('Channel (for channel settings)').setRequired(false))
-        .addRoleOption(o => o.setName('role').setDescription('Role (for single role settings)').setRequired(false))
+        .addRoleOption(o => o.setName('role').setDescription('Role (for role settings)').setRequired(false))
         .addStringOption(o => o.setName('roles').setDescription('Comma-separated role IDs or mentions (for multi-role settings)').setRequired(false))
     )
     .addSubcommand(sub =>
@@ -48,14 +47,14 @@ module.exports = {
       const embed = baseEmbed()
         .setTitle('Bot Configuration')
         .addFields(
-          { name: 'Approval Channel', value: getConfig('approval_channel') ? `<#${getConfig('approval_channel')}>` : 'Not set', inline: true },
-          { name: 'Blacklist Channel', value: getConfig('blacklist_channel') ? `<#${getConfig('blacklist_channel')}>` : 'Not set (falls back to Approval)', inline: true },
-          { name: 'Panel Channel', value: getConfig('panel_channel') ? `<#${getConfig('panel_channel')}>` : 'Not set', inline: true },
-          { name: 'Poll Channel', value: getConfig('poll_channel') ? `<#${getConfig('poll_channel')}>` : 'Not set', inline: true },
-          { name: 'Staff Post Channel', value: getConfig('staff_post_channel') ? `<#${getConfig('staff_post_channel')}>` : 'Not set', inline: true },
-          { name: 'Outreach Ping Role', value: getConfig('outreach_ping_role') ? `<@&${getConfig('outreach_ping_role')}>` : 'Not set', inline: true },
-          { name: 'Management Roles', value: (getConfigJSON('management_roles', []) || []).map(id => `<@&${id}>`).join(', ') || 'None (admins only)', inline: false },
-          { name: 'Staff Roles', value: (getConfigJSON('staff_roles', []) || []).map(id => `<@&${id}>`).join(', ') || 'None', inline: false }
+          { name: 'Approval Channel', value: getConfig('approval_channel') ? '<#' + getConfig('approval_channel') + '>' : 'Not set', inline: true },
+          { name: 'Blacklist Channel', value: getConfig('blacklist_channel') ? '<#' + getConfig('blacklist_channel') + '>' : 'Not set', inline: true },
+          { name: 'Outreach Log Channel', value: getConfig('outreach_channel') ? '<#' + getConfig('outreach_channel') + '>' : 'Not set', inline: true },
+          { name: 'Request Ping Role', value: getConfig('request_ping_role') ? '<@&' + getConfig('request_ping_role') + '>' : 'Not set', inline: true },
+          { name: 'Outreach Ping Role', value: getConfig('outreach_ping_role') ? '<@&' + getConfig('outreach_ping_role') + '>' : 'Not set', inline: true },
+          { name: 'Blacklist Ping Role', value: getConfig('blacklist_ping_role') ? '<@&' + getConfig('blacklist_ping_role') + '>' : 'Not set', inline: true },
+          { name: 'Management Roles', value: (getConfigJSON('management_roles', []) || []).map(id => '<@&' + id + '>').join(', ') || 'None (admins only)', inline: false },
+          { name: 'Staff Roles', value: (getConfigJSON('staff_roles', []) || []).map(id => '<@&' + id + '>').join(', ') || 'None', inline: false }
         );
       return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
@@ -66,24 +65,20 @@ module.exports = {
       const role = interaction.options.getRole('role');
       const rolesStr = interaction.options.getString('roles');
 
-      const channelKeys = ['approval_channel', 'blacklist_channel', 'panel_channel', 'poll_channel', 'staff_post_channel'];
-      const singleRoleKeys = ['outreach_ping_role'];
-      const multiRoleKeys = ['management_roles', 'staff_roles', 'post_roles', 'embed_roles'];
+      const channelKeys = ['approval_channel', 'blacklist_channel', 'outreach_channel', 'panel_channel'];
+      const singleRoleKeys = ['request_ping_role', 'outreach_ping_role', 'blacklist_ping_role'];
+      const multiRoleKeys = ['management_roles', 'staff_roles'];
 
       if (channelKeys.includes(key)) {
-        if (!channel) {
-          return interaction.reply({ content: 'Please provide a channel for this setting.', flags: MessageFlags.Ephemeral });
-        }
+        if (!channel) return interaction.reply({ content: 'Please provide a channel for this setting.', flags: MessageFlags.Ephemeral });
         setConfig(key, channel.id);
-        return interaction.reply({ content: `Set **${key}** to <#${channel.id}>.`, flags: MessageFlags.Ephemeral });
+        return interaction.reply({ content: 'Set **' + key + '** to <#' + channel.id + '>.', flags: MessageFlags.Ephemeral });
       }
 
       if (singleRoleKeys.includes(key)) {
-        if (!role) {
-          return interaction.reply({ content: 'Please provide a role for this setting.', flags: MessageFlags.Ephemeral });
-        }
+        if (!role) return interaction.reply({ content: 'Please provide a role for this setting.', flags: MessageFlags.Ephemeral });
         setConfig(key, role.id);
-        return interaction.reply({ content: `Set **${key}** to <@&${role.id}>.`, flags: MessageFlags.Ephemeral });
+        return interaction.reply({ content: 'Set **' + key + '** to <@&' + role.id + '>.', flags: MessageFlags.Ephemeral });
       }
 
       if (multiRoleKeys.includes(key)) {
@@ -97,10 +92,7 @@ module.exports = {
           return interaction.reply({ content: 'Provide a role or a comma-separated list of role IDs/mentions.', flags: MessageFlags.Ephemeral });
         }
         setConfigJSON(key, ids);
-        return interaction.reply({
-          content: `Set **${key}** to: ${ids.map(id => `<@&${id}>`).join(', ')}`,
-          flags: MessageFlags.Ephemeral
-        });
+        return interaction.reply({ content: 'Set **' + key + '** to: ' + ids.map(id => '<@&' + id + '>').join(', '), flags: MessageFlags.Ephemeral });
       }
 
       return interaction.reply({ content: 'Unknown configuration key.', flags: MessageFlags.Ephemeral });
