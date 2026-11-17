@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags, ChannelType } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const { setConfig, getConfig, setConfigJSON, getConfigJSON } = require('../database');
 const { hasManagementRole } = require('../utils/permissions');
 const { baseEmbed } = require('../utils/embeds');
@@ -17,6 +17,7 @@ module.exports = {
             .setRequired(true)
             .addChoices(
               { name: 'Approval Channel', value: 'approval_channel' },
+              { name: 'Blacklist Channel', value: 'blacklist_channel' },
               { name: 'Panel Channel', value: 'panel_channel' },
               { name: 'Poll Channel', value: 'poll_channel' },
               { name: 'Staff Post Channel', value: 'staff_post_channel' },
@@ -48,6 +49,7 @@ module.exports = {
         .setTitle('Bot Configuration')
         .addFields(
           { name: 'Approval Channel', value: getConfig('approval_channel') ? `<#${getConfig('approval_channel')}>` : 'Not set', inline: true },
+          { name: 'Blacklist Channel', value: getConfig('blacklist_channel') ? `<#${getConfig('blacklist_channel')}>` : 'Not set (falls back to Approval)', inline: true },
           { name: 'Panel Channel', value: getConfig('panel_channel') ? `<#${getConfig('panel_channel')}>` : 'Not set', inline: true },
           { name: 'Poll Channel', value: getConfig('poll_channel') ? `<#${getConfig('poll_channel')}>` : 'Not set', inline: true },
           { name: 'Staff Post Channel', value: getConfig('staff_post_channel') ? `<#${getConfig('staff_post_channel')}>` : 'Not set', inline: true },
@@ -64,7 +66,7 @@ module.exports = {
       const role = interaction.options.getRole('role');
       const rolesStr = interaction.options.getString('roles');
 
-      const channelKeys = ['approval_channel', 'panel_channel', 'poll_channel', 'staff_post_channel'];
+      const channelKeys = ['approval_channel', 'blacklist_channel', 'panel_channel', 'poll_channel', 'staff_post_channel'];
       const singleRoleKeys = ['outreach_ping_role'];
       const multiRoleKeys = ['management_roles', 'staff_roles', 'post_roles', 'embed_roles'];
 
@@ -87,7 +89,6 @@ module.exports = {
       if (multiRoleKeys.includes(key)) {
         let ids = [];
         if (rolesStr) {
-          // Parse mentions or raw IDs
           const matches = rolesStr.match(/\d{17,20}/g) || [];
           ids = [...new Set(matches)];
         } else if (role) {

@@ -26,7 +26,7 @@ module.exports = {
 
     if (sub === 'create') {
       const embed = panelEmbed();
-      const components = [panelButtons()];
+      const components = panelButtons();
 
       const msg = await interaction.channel.send({ embeds: [embed], components });
 
@@ -35,7 +35,6 @@ module.exports = {
         VALUES (?, ?, ?)
       `).run(interaction.guildId, interaction.channelId, msg.id);
 
-      // Also store channel for convenience
       require('../database').setConfig('panel_channel', interaction.channelId);
 
       await interaction.reply({
@@ -51,7 +50,7 @@ module.exports = {
       try {
         const channel = await interaction.client.channels.fetch(row.channel_id);
         const msg = await channel.messages.fetch(row.message_id);
-        await msg.edit({ embeds: [panelEmbed()], components: [panelButtons()] });
+        await msg.edit({ embeds: [panelEmbed()], components: panelButtons() });
         await interaction.reply({ content: 'Panel updated.', flags: MessageFlags.Ephemeral });
       } catch (e) {
         await interaction.reply({ content: 'Failed to update panel. It may have been deleted. Use `/panel create` again.', flags: MessageFlags.Ephemeral });
