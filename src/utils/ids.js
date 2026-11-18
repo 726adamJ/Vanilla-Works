@@ -2,32 +2,17 @@ const { v4: uuidv4 } = require('uuid');
 
 function generateId(prefix = '') {
   const id = uuidv4().split('-')[0].toUpperCase();
-  return prefix ? `${prefix}-${id}` : id;
+  return prefix ? prefix + '-' + id : id;
 }
 
-function generateRequestId() {
-  return generateId('REQ');
-}
-
-function generateLogId() {
-  return generateId('LOG');
-}
-
-function generatePollId() {
-  return generateId('POLL');
-}
-
-function generatePostId() {
-  return generateId('POST');
-}
-
-function generateEmbedId() {
-  return generateId('EMB');
-}
-
-function generateBlacklistId() {
-  return generateId('BL');
-}
+function generateRequestId() { return generateId('REQ'); }
+function generateLogId() { return generateId('LOG'); }
+function generatePollId() { return generateId('POLL'); }
+function generatePostId() { return generateId('POST'); }
+function generateEmbedId() { return generateId('EMB'); }
+function generateBlacklistId() { return generateId('BL'); }
+function generatePaymentId() { return generateId('PAY'); }
+function generateLoaId() { return generateId('LOA'); }
 
 module.exports = {
   generateId,
@@ -36,5 +21,7 @@ module.exports = {
   generatePollId,
   generatePostId,
   generateEmbedId,
-  generateBlacklistId
+  generateBlacklistId,
+  generatePaymentId,
+  generateLoaId
 };

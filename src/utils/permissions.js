@@ -1,4 +1,4 @@
-const { getConfigJSON } = require('../database');
+const { getConfigJSON, getConfig } = require('../database');
 
 function getManagementRoles() {
   return getConfigJSON('management_roles', []) || [];
@@ -10,8 +10,9 @@ function getStaffRoles() {
 
 function hasManagementRole(member) {
   if (!member) return false;
-  if (member.permissions.has('Administrator')) return true;
+  if (member.permissions && member.permissions.has('Administrator')) return true;
   const roles = getManagementRoles();
+  if (!roles.length) return member.permissions && member.permissions.has('Administrator');
   return member.roles.cache.some(r => roles.includes(r.id));
 }
 
@@ -26,25 +27,24 @@ function canApproveRequests(member) {
   return hasManagementRole(member);
 }
 
-function canCreatePolls(member) {
+function canUseSlashCommands(member) {
   return hasManagementRole(member);
 }
 
-function canCreatePosts(member) {
-  // Configurable, default to staff+
-  const postRoles = getConfigJSON('post_roles', null);
-  if (postRoles && postRoles.length > 0) {
-    return member.roles.cache.some(r => postRoles.includes(r.id)) || hasManagementRole(member);
-  }
-  return hasStaffRole(member);
+function getStaffRank(member) {
+  const seniorId = getConfig('senior_pr_role');
+  const juniorId = getConfig('junior_pr_role');
+  if (seniorId && member.roles.cache.has(seniorId)) return 'Senior';
+  if (juniorId && member.roles.cache.has(juniorId)) return 'Junior';
+  // Default to Junior if no rank role assigned
+  return 'Junior';
 }
 
-function canCreateEmbeds(member) {
-  const embedRoles = getConfigJSON('embed_roles', null);
-  if (embedRoles && embedRoles.length > 0) {
-    return member.roles.cache.some(r => embedRoles.includes(r.id)) || hasManagementRole(member);
+function getPayRates(rank) {
+  if (rank === 'Senior') {
+    return { partnership: 60, mutual: 65, invite: 40 };
   }
-  return hasManagementRole(member);
+  return { partnership: 50, mutual: 55, invite: 40 };
 }
 
 module.exports = {
@@ -53,7 +53,7 @@ module.exports = {
   hasManagementRole,
   hasStaffRole,
   canApproveRequests,
-  canCreatePolls,
-  canCreatePosts,
-  canCreateEmbeds
+  canUseSlashCommands,
+  getStaffRank,
+  getPayRates
 };
