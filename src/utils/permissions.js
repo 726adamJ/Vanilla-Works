@@ -31,6 +31,10 @@ function canUseSlashCommands(member) {
   return hasManagementRole(member);
 }
 
+function canCreateEmbeds(member) {
+  return hasManagementRole(member);
+}
+
 function getStaffRank(member) {
   const seniorId = getConfig('senior_pr_role');
   const juniorId = getConfig('junior_pr_role');
@@ -54,6 +58,7 @@ module.exports = {
   hasStaffRole,
   canApproveRequests,
   canUseSlashCommands,
+  canCreateEmbeds,
   getStaffRank,
   getPayRates
 };
