@@ -55,6 +55,11 @@ function messageLink(guildId, channelId, messageId) {
 async function handleButton(interaction, client) {
   const id = interaction.customId;
 
+  // Custom embed publish / cancel
+  if (id.startsWith('embed_publish_') || id.startsWith('embed_cancel_')) {
+    return handleEmbedButton(interaction, client);
+  }
+
   if (id === 'pr_post_request') {
     if (!hasStaffRole(interaction.member)) return interaction.reply({ content: 'You do not have permission.', flags: MessageFlags.Ephemeral });
     const { requestTypeSelect } = require('../utils/embeds');
@@ -539,7 +544,6 @@ async function handlePaymentPaid(interaction, payId, client) {
   if (req.status !== 'scheduled') return interaction.reply({ content: 'Payment must be scheduled first. Status: ' + req.status, flags: MessageFlags.Ephemeral });
   db.prepare("UPDATE payment_requests SET status = 'paid', paid_at = datetime('now') WHERE id = ?").run(payId);
 
-  // Reset logs included in this payment so they cannot be paid for again
   let cleared = 0;
   try {
     const logIds = JSON.parse(req.log_ids || '[]');
@@ -728,4 +732,65 @@ async function handleBlacklistReject(interaction, blId, client) {
     await user.send({ embeds: [dmEmbed('Blacklist Rejected', 'Your blacklist request **' + blId + '** was rejected.\n**Reason:** ' + reason, DANGER_COLOR)] });
   } catch {}
   await interaction.reply({ content: 'Blacklist ' + blId + ' rejected.', flags: MessageFlags.Ephemeral });
+}
+
+async function handleEmbedButton(interaction, client) {
+  const id = interaction.customId;
+  const isPublish = id.startsWith('embed_publish_');
+  const draftId = id.replace(isPublish ? 'embed_publish_' : 'embed_cancel_', '');
+  let embedCmd;
+  try {
+    embedCmd = require('../commands/embed');
+  } catch (e) {
+    return interaction.reply({ content: 'Embed module not available.', flags: MessageFlags.Ephemeral });
+  }
+  const draftStore = embedCmd.draftStore;
+  const draft = draftStore && draftStore.get(draftId);
+  if (!draft) {
+    return interaction.reply({ content: 'This draft expired or was already used. Run /embed create again.', flags: MessageFlags.Ephemeral });
+  }
+  if (draft.creatorId !== interaction.user.id) {
+    return interaction.reply({ content: 'Only the person who created this draft can use these buttons.', flags: MessageFlags.Ephemeral });
+  }
+  if (draft.expires < Date.now()) {
+    draftStore.delete(draftId);
+    return interaction.reply({ content: 'This draft has expired. Run /embed create again.', flags: MessageFlags.Ephemeral });
+  }
+
+  if (!isPublish) {
+    draftStore.delete(draftId);
+    return interaction.update({ content: 'Embed cancelled.', embeds: [], components: [] });
+  }
+
+  const channel = await client.channels.fetch(draft.channelId).catch(() => null);
+  if (!channel || !channel.isTextBased()) {
+    draftStore.delete(draftId);
+    return interaction.update({ content: 'Could not find the target channel.', embeds: [], components: [] });
+  }
+
+  const { db } = require('../database');
+  const embed = embedCmd.buildEmbedFromData(draft.embedData);
+  const content = draft.embedData.ping || null;
+  let msg;
+  try {
+    msg = await channel.send({ content, embeds: [embed] });
+  } catch (e) {
+    console.error('Embed publish failed:', e);
+    return interaction.update({ content: 'Failed to send embed. Check bot permissions in that channel.', embeds: [], components: [] });
+  }
+
+  const embedId = draftId;
+  db.prepare('INSERT INTO custom_embeds (id, creator_id, channel_id, message_id, data) VALUES (?, ?, ?, ?, ?)').run(
+    embedId,
+    interaction.user.id,
+    channel.id,
+    msg.id,
+    JSON.stringify(draft.embedData)
+  );
+  draftStore.delete(draftId);
+  return interaction.update({
+    content: 'Embed published to <#' + channel.id + '>\n**Embed ID:** `' + embedId + '` (use `/embed delete` with this ID to remove it)',
+    embeds: [embed],
+    components: []
+  });
 }
