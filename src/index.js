@@ -29,18 +29,25 @@ if (fs.existsSync(commandsPath)) {
   }
 }
 
-// Load events
+// Load events — only explicit event files (never cache/runtime/partials)
 const eventsPath = path.join(__dirname, 'events');
-if (fs.existsSync(eventsPath)) {
-  const eventFiles = fs.readdirSync(eventsPath).filter(f => f.endsWith('.js'));
-  for (const file of eventFiles) {
-    const event = require(path.join(eventsPath, file));
-    if (event.once) {
-      client.once(event.name, (...args) => event.execute(...args, client));
-    } else {
-      client.on(event.name, (...args) => event.execute(...args, client));
-    }
+const EVENT_FILES = [
+  'ready.js',
+  'interactionCreate.js',
+  'messageCreate.js',
+  'messageDelete.js'
+];
+for (const file of EVENT_FILES) {
+  const full = path.join(eventsPath, file);
+  if (!fs.existsSync(full)) continue;
+  const event = require(full);
+  if (!event || !event.name || !event.execute) continue;
+  if (event.once) {
+    client.once(event.name, (...args) => event.execute(...args, client));
+  } else {
+    client.on(event.name, (...args) => event.execute(...args, client));
   }
+  console.log('Loaded event:', event.name, '(' + file + ')');
 }
 
 // Graceful shutdown
