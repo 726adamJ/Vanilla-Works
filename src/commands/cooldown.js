@@ -2,12 +2,21 @@ const {
   SlashCommandBuilder,
   PermissionFlagsBits,
   MessageFlags,
-  ChannelType
+  ChannelType,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  ActionRowBuilder
 } = require('discord.js');
 const { hasManagementRole } = require('../utils/permissions');
 const { baseEmbed, SUCCESS_COLOR, DANGER_COLOR } = require('../utils/embeds');
 const { db, setConfig, getConfig } = require('../database');
-const { buildCooldownEmbed, refreshCooldownPanel, formatRemaining } = require('../utils/cooldownPanel');
+const {
+  buildCooldownEmbed,
+  refreshCooldownPanel,
+  formatRemaining,
+  parseCooldownList
+} = require('../utils/cooldownPanel');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -16,7 +25,7 @@ module.exports = {
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addSubcommand(sub =>
       sub.setName('panel')
-        .setDescription('Post or refresh the cooldown panel (one embed with all servers)')
+        .setDescription('Post or refresh the cooldown panel')
         .addChannelOption(o =>
           o.setName('channel')
             .setDescription('Channel to post the panel in (required first time)')
@@ -26,7 +35,7 @@ module.exports = {
     )
     .addSubcommand(sub =>
       sub.setName('add')
-        .setDescription('Manually put a server on cooldown')
+        .setDescription('Manually put one server on cooldown')
         .addStringOption(o =>
           o.setName('server_name')
             .setDescription('Server name')
@@ -40,6 +49,10 @@ module.exports = {
             .setMinValue(0.1)
             .setMaxValue(365)
         )
+    )
+    .addSubcommand(sub =>
+      sub.setName('import')
+        .setDescription('Bulk-import cooldowns from a DD/MM/YYYY - Server list')
     )
     .addSubcommand(sub =>
       sub.setName('remove')
@@ -90,7 +103,6 @@ module.exports = {
 
       const embed = buildCooldownEmbed();
 
-      // Try to edit existing panel message
       if (messageId) {
         const existing = await channel.messages.fetch(messageId).catch(() => null);
         if (existing) {
@@ -111,6 +123,26 @@ module.exports = {
         content: 'Cooldown panel posted in <#' + channelId + '>.',
         flags: MessageFlags.Ephemeral
       });
+    }
+
+    if (sub === 'import') {
+      const modal = new ModalBuilder()
+        .setCustomId('modal_cooldown_import')
+        .setTitle('Import Cooldown List');
+
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId('list')
+            .setLabel('Paste list (DD/MM/YYYY - Server Name)')
+            .setStyle(TextInputStyle.Paragraph)
+            .setRequired(true)
+            .setMaxLength(4000)
+            .setPlaceholder('28/11/2026 - Voidcrafts\n27/11/2026 - Cyntra\n26/11/2026 - Codex Customs')
+        )
+      );
+
+      return interaction.showModal(modal);
     }
 
     if (sub === 'add') {
@@ -184,3 +216,76 @@ module.exports = {
     }
   }
 };
+
+// Modal handler (called from interactionCreate)
+async function handleCooldownImportModal(interaction, client) {
+  const { hasManagementRole } = require('../utils/permissions');
+  if (!hasManagementRole(interaction.member)) {
+    return interaction.reply({
+      content: 'Only management can import cooldowns.',
+      flags: MessageFlags.Ephemeral
+    });
+  }
+
+  const text = interaction.fields.getTextInputValue('list');
+  const { results, skipped } = parseCooldownList(text);
+
+  if (!results.length) {
+    return interaction.reply({
+      content:
+        'No valid lines found. Use format:\n`28/11/2026 - Server Name`' +
+        (skipped.length ? '\n\nSkipped:\n' + skipped.slice(0, 10).join('\n') : ''),
+      flags: MessageFlags.Ephemeral
+    });
+  }
+
+  let added = 0;
+  let updated = 0;
+  const names = [];
+
+  const insert = db.prepare(
+    'INSERT INTO server_cooldowns (server_name, expires_at, duration_days, added_by) VALUES (?, ?, ?, ?)'
+  );
+  const findActive = db.prepare(
+    'SELECT id FROM server_cooldowns WHERE lower(server_name) = lower(?) AND expires_at > ?'
+  );
+  const del = db.prepare('DELETE FROM server_cooldowns WHERE id = ?');
+
+  for (const item of results) {
+    const existing = findActive.get(item.serverName, new Date().toISOString());
+    if (existing) {
+      del.run(existing.id);
+      updated++;
+    } else {
+      added++;
+    }
+    insert.run(item.serverName, item.expiresAt, item.durationDays, interaction.user.id);
+    names.push(item.serverName);
+  }
+
+  await refreshCooldownPanel(client);
+
+  const skipText = skipped.length
+    ? '\n\n**Skipped (' + skipped.length + '):**\n' + skipped.slice(0, 15).map(s => '• ' + s).join('\n')
+    : '';
+
+  return interaction.reply({
+    embeds: [
+      baseEmbed()
+        .setColor(SUCCESS_COLOR)
+        .setTitle('Cooldown Import Complete')
+        .setDescription(
+          '**Added:** ' + added + '\n' +
+          '**Updated:** ' + updated + '\n' +
+          '**Total processed:** ' + results.length + '\n\n' +
+          names.slice(0, 25).map(n => '• ' + n).join('\n') +
+          (names.length > 25 ? '\n…and ' + (names.length - 25) + ' more' : '') +
+          skipText +
+          '\n\nPanel sorted **longest → shortest**. Run `/cooldown panel` if the panel is not posted yet.'
+        )
+    ],
+    flags: MessageFlags.Ephemeral
+  });
+}
+
+module.exports.handleCooldownImportModal = handleCooldownImportModal;
