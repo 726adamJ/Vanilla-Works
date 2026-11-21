@@ -1,36 +1,14 @@
-const { MessageFlags } = require('discord.js');
-const { canUseSlashCommands } = require('../utils/permissions');
-const { handleButton, handleModal } = require('../handlers/interactions');
+const fs = require('fs');
+const path = require('path');
+const Module = require('module');
 
-const tempData = new Map();
+const dir = path.join(__dirname, 'ic_parts');
+const code = ['c1.js', 'c2.js', 'c3.js']
+  .map((f) => fs.readFileSync(path.join(dir, f), 'utf8'))
+  .join('');
 
-module.exports = {
-  name: 'interactionCreate',
-  async execute(interaction, client) {
-    if (!client.tempData) client.tempData = tempData;
-    try {
-      if (interaction.isChatInputCommand()) {
-        if (!canUseSlashCommands(interaction.member)) {
-          return interaction.reply({
-            content: 'Only management can use slash commands. Staff should use the panel buttons.',
-            flags: MessageFlags.Ephemeral
-          });
-        }
-        const command = client.commands.get(interaction.commandName);
-        if (!command) return;
-        await command.execute(interaction, client);
-        return;
-      }
-      if (interaction.isButton()) return handleButton(interaction, client);
-      if (interaction.isModalSubmit()) return handleModal(interaction, client);
-    } catch (error) {
-      console.error('Interaction error:', error);
-      const payload = {
-        content: 'An unexpected error occurred. Please try again or contact management.',
-        flags: MessageFlags.Ephemeral
-      };
-      if (interaction.replied || interaction.deferred) await interaction.followUp(payload).catch(() => {});
-      else await interaction.reply(payload).catch(() => {});
-    }
-  }
-};
+const m = new Module(path.join(__dirname, 'interactionCreate.full.js'));
+m.filename = path.join(__dirname, 'interactionCreate.full.js');
+m.paths = module.paths;
+m._compile(code, m.filename);
+module.exports = m.exports;
