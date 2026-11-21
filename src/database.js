@@ -163,6 +163,25 @@ db.exec(`
     channel_id TEXT NOT NULL,
     message_id TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS temp_roles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    role_id TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    added_by TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS server_cooldowns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_name TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    duration_days REAL NOT NULL,
+    added_by TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
 `);
 
 // Migration: add channel_id to outreach_logs if missing

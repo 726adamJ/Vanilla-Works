@@ -50,18 +50,58 @@ module.exports = {
       }
     }, 60 * 1000);
 
+    // Temp roles + cooldown panel maintenance every 30s
+    setInterval(async () => {
+      try {
+        const { db } = require('../database');
+        const now = new Date().toISOString();
+
+        // Expire temp roles — remove only that role
+        const expiredRoles = db.prepare(
+          'SELECT * FROM temp_roles WHERE expires_at <= ?'
+        ).all(now);
+
+        for (const row of expiredRoles) {
+          try {
+            const guild = await client.guilds.fetch(row.guild_id).catch(() => null);
+            if (guild) {
+              const member = await guild.members.fetch(row.user_id).catch(() => null);
+              if (member && member.roles.cache.has(row.role_id)) {
+                await member.roles.remove(row.role_id, 'Temporary role expired').catch((e) => {
+                  console.error('Temp role remove failed:', e.message);
+                });
+              }
+            }
+          } catch (e) {
+            console.error('Temp role expiry error:', e.message);
+          }
+          db.prepare('DELETE FROM temp_roles WHERE id = ?').run(row.id);
+          console.log('[TempRole] Removed role ' + row.role_id + ' from user ' + row.user_id);
+        }
+
+        // Purge expired cooldowns + refresh panel
+        const { purgeExpiredCooldowns, refreshCooldownPanel } = require('../utils/cooldownPanel');
+        const removed = purgeExpiredCooldowns();
+        if (removed > 0) {
+          console.log('[Cooldown] Removed ' + removed + ' expired server cooldown(s)');
+        }
+        await refreshCooldownPanel(client);
+      } catch (err) {
+        console.error('TempRole/Cooldown maintenance error:', err);
+      }
+    }, 30 * 1000);
+
     // Weekly tracking report — Sunday 12:00 AM EST (05:00 UTC)
     setInterval(async () => {
       try {
         const now = new Date();
-        const utcDay = now.getUTCDay(); // 0 = Sunday
+        const utcDay = now.getUTCDay();
         const utcHour = now.getUTCHours();
         const utcMin = now.getUTCMinutes();
 
-        // Fire once in the 05:00–05:01 UTC window on Sunday
         if (utcDay !== 0 || utcHour !== 5 || utcMin > 1) return;
 
-        const { db, getConfig } = require('../database');
+        const { db, getConfig, setConfig } = require('../database');
         const channelId = getConfig('tracking_channel');
         if (!channelId) return;
 
@@ -102,7 +142,6 @@ module.exports = {
           .setFooter({ text: 'Vanilla Works | Weekly Tracking' });
 
         await channel.send({ embeds: [embed] });
-        const { setConfig } = require('../database');
         setConfig('last_weekly_report', todayKey);
       } catch (err) {
         console.error('Weekly report error:', err);
