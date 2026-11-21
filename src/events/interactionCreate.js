@@ -55,7 +55,6 @@ function messageLink(guildId, channelId, messageId) {
 async function handleButton(interaction, client) {
   const id = interaction.customId;
 
-  // Custom embed publish / cancel
   if (id.startsWith('embed_publish_') || id.startsWith('embed_cancel_')) {
     return handleEmbedButton(interaction, client);
   }
@@ -143,11 +142,14 @@ async function handleButton(interaction, client) {
   }
 
   if (id.startsWith('copy_')) {
-    const payload = id.slice(5);
-    const parts = payload.split('_');
-    const fieldKey = parts.pop();
-    const reqId = parts.join('_');
-    return handleCopyField(interaction, reqId, fieldKey);
+    const { parseCopyCustomId } = require('../utils/copyFields');
+    const parsed = parseCopyCustomId(id);
+    if (!parsed) return interaction.reply({ content: 'Invalid copy button.', flags: MessageFlags.Ephemeral });
+    return handleCopyField(interaction, parsed.reqId, parsed.fieldKey);
+  }
+
+  if (id.startsWith('auto_log_approve_') || id.startsWith('auto_log_cancel_')) {
+    return handleAutoLogButton(interaction, client);
   }
 
   if (id.startsWith('approve_req_')) return handleApprove(interaction, id.replace('approve_req_', ''), client);
@@ -222,7 +224,7 @@ async function showTotalOutreach(interaction) {
 async function handleCopyField(interaction, reqId, fieldKey) {
   const { db } = require('../database');
   const req = db.prepare('SELECT * FROM requests WHERE id = ?').get(reqId);
-  if (!req) return interaction.reply({ content: 'Request not found.', flags: MessageFlags.Ephemeral });
+  if (!req) return interaction.reply({ content: 'Request not found for ID `' + reqId + '` (field: ' + fieldKey + '). If this is an old request, re-submit it so copy buttons regenerate.', flags: MessageFlags.Ephemeral });
   let data; try { data = JSON.parse(req.data); } catch { data = {}; }
   const value = data[fieldKey];
   if (value === undefined || value === null || value === '') {
@@ -234,6 +236,7 @@ async function handleCopyField(interaction, reqId, fieldKey) {
 async function handleMutualSubmit(interaction, client) {
   const { db, getConfig } = require('../database');
   const { generateRequestId } = require('../utils/ids');
+  const { copyButtonId } = require('../utils/copyFields');
   const durationRaw = interaction.fields.getTextInputValue('duration');
   let winners = '1';
   const m = durationRaw.match(/(\d+)\s*winners?/i);
@@ -269,11 +272,11 @@ async function handleMutualSubmit(interaction, client) {
     new ButtonBuilder().setCustomId('reject_req_' + reqId).setLabel('Reject').setStyle(ButtonStyle.Danger)
   );
   const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('copy_' + reqId + '_invite').setLabel('Copy Invite').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('copy_' + reqId + '_prize').setLabel('Copy Prize').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('copy_' + reqId + '_their_ping').setLabel('Copy Their Ping').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('copy_' + reqId + '_our_ping').setLabel('Copy Our Ping').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('copy_' + reqId + '_duration').setLabel('Copy Duration').setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId(copyButtonId(reqId, 'invite')).setLabel('Copy Invite').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(copyButtonId(reqId, 'prize')).setLabel('Copy Prize').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(copyButtonId(reqId, 'their_ping')).setLabel('Copy Their Ping').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(copyButtonId(reqId, 'our_ping')).setLabel('Copy Our Ping').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(copyButtonId(reqId, 'duration')).setLabel('Copy Duration').setStyle(ButtonStyle.Secondary)
   );
   const content = pingContent(getConfig('request_ping_role'));
   const msg = await channel.send({ content, embeds: [embed], components: [row1, row2] });
@@ -285,6 +288,7 @@ async function handleMutualSubmit(interaction, client) {
 async function handlePartnershipSubmit(interaction, client) {
   const { db, getConfig } = require('../database');
   const { generateRequestId } = require('../utils/ids');
+  const { copyButtonId } = require('../utils/copyFields');
   const data = {
     server_name: interaction.fields.getTextInputValue('server_name'),
     our_ping: interaction.fields.getTextInputValue('our_ping'),
@@ -312,10 +316,10 @@ async function handlePartnershipSubmit(interaction, client) {
     new ButtonBuilder().setCustomId('reject_req_' + reqId).setLabel('Reject').setStyle(ButtonStyle.Danger)
   );
   const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('copy_' + reqId + '_server_name').setLabel('Copy Server Name').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('copy_' + reqId + '_our_ping').setLabel('Copy Our Ping').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('copy_' + reqId + '_their_ping').setLabel('Copy Their Ping').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('copy_' + reqId + '_partners_ad').setLabel('Copy Partners Ad').setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId(copyButtonId(reqId, 'server_name')).setLabel('Copy Server Name').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(copyButtonId(reqId, 'our_ping')).setLabel('Copy Our Ping').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(copyButtonId(reqId, 'their_ping')).setLabel('Copy Their Ping').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(copyButtonId(reqId, 'partners_ad')).setLabel('Copy Partners Ad').setStyle(ButtonStyle.Secondary)
   );
   const content = pingContent(getConfig('request_ping_role'));
   const msg = await channel.send({ content, embeds: [embed], components: [row1, row2] });
@@ -447,9 +451,12 @@ async function handlePaymentSubmit(interaction, client) {
   const payId = generatePaymentId();
   const logIds = logs.map(l => l.id);
   const guildId = interaction.guildId;
-  const linkLines = logs.slice(0, 25).map(l => {
-    const link = messageLink(guildId, l.channel_id || l.thread_id, l.message_id);
-    return link ? '[' + l.id + ' — ' + l.type + '](' + link + ')' : l.id + ' — ' + l.type;
+  const linkLines = logs.slice(0, 25).map((l, i) => {
+    const ch = l.channel_id || l.thread_id;
+    const mid = l.message_id;
+    const link = (guildId && ch && mid) ? messageLink(guildId, ch, mid) : null;
+    const label = (i + 1) + '. ' + l.id + ' — ' + (l.type || '?');
+    return link ? '[' + label + '](' + link + ')' : label + ' (no message link)';
   });
   if (logs.length > 25) linkLines.push('...and ' + (logs.length - 25) + ' more');
   db.prepare("INSERT INTO payment_requests (id, user_id, roblox_username, rank, mutual_count, partner_count, total_pay, log_ids, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')").run(payId, userId, roblox, rank, mutual, partner, totalPay, JSON.stringify(logIds));
@@ -791,6 +798,115 @@ async function handleEmbedButton(interaction, client) {
   return interaction.update({
     content: 'Embed published to <#' + channel.id + '>\n**Embed ID:** `' + embedId + '` (use `/embed delete` with this ID to remove it)',
     embeds: [embed],
+    components: []
+  });
+}
+
+async function handleAutoLogButton(interaction, client) {
+  const { hasManagementRole } = require('../utils/permissions');
+  if (!hasManagementRole(interaction.member)) {
+    return interaction.reply({ content: 'Only management can approve auto-log imports.', flags: MessageFlags.Ephemeral });
+  }
+
+  const id = interaction.customId;
+  const isApprove = id.startsWith('auto_log_approve_');
+  const jobId = id.replace(isApprove ? 'auto_log_approve_' : 'auto_log_cancel_', '');
+
+  let autoCmd;
+  try { autoCmd = require('../commands/auto'); } catch {
+    return interaction.reply({ content: 'Auto log module missing.', flags: MessageFlags.Ephemeral });
+  }
+  const job = autoCmd.pendingJobs.get(jobId);
+  if (!job) {
+    return interaction.update({ content: 'This auto-log job expired or was already used.', embeds: [], components: [] }).catch(() =>
+      interaction.reply({ content: 'This auto-log job expired or was already used.', flags: MessageFlags.Ephemeral })
+    );
+  }
+  if (job.expires < Date.now()) {
+    autoCmd.pendingJobs.delete(jobId);
+    return interaction.update({ content: 'This auto-log job has expired. Run /auto log again.', embeds: [], components: [] });
+  }
+
+  if (!isApprove) {
+    autoCmd.pendingJobs.delete(jobId);
+    return interaction.update({ content: 'Auto-log import cancelled.', embeds: [], components: [] });
+  }
+
+  await interaction.update({
+    embeds: [baseEmbed().setColor(0xF39C12).setTitle('Auto Log — Importing...').setDescription('Posting logs into staff threads. Please wait...')],
+    components: []
+  });
+
+  const { db } = require('../database');
+  const { generateLogId } = require('../utils/ids');
+  const results = [];
+  let imported = 0;
+  let failed = 0;
+
+  for (const [userId, entries] of Object.entries(job.byUser)) {
+    const threadId = job.threadByUser[userId];
+    if (!threadId) {
+      results.push('<@' + userId + '>: skipped (no thread)');
+      failed += entries.length;
+      continue;
+    }
+    const thread = await client.channels.fetch(threadId).catch(() => null);
+    if (!thread) {
+      results.push('<@' + userId + '>: skipped (thread not found)');
+      failed += entries.length;
+      continue;
+    }
+
+    let ok = 0;
+    for (const entry of entries) {
+      try {
+        const logId = generateLogId();
+        const embed = baseEmbed()
+          .setColor(0x000000)
+          .setTitle('Outreach Log — ' + entry.type + ' (Auto-Import)')
+          .setDescription('**Log ID:** `' + logId + '`\n**Imported from:** ' + (entry.url || 'source channel'))
+          .addFields(
+            { name: 'Staff', value: '<@' + userId + '>', inline: true },
+            { name: 'Type', value: entry.type, inline: true },
+            { name: 'Server Invite', value: entry.invite || 'N/A' },
+            { name: 'Original Message', value: (entry.content || '').slice(0, 1000) || '—' }
+          );
+        const msg = await thread.send({ embeds: [embed] });
+        db.prepare(
+          'INSERT INTO outreach_logs (id, user_id, server_invite, pings, type, evidence_url, thread_id, message_id, channel_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        ).run(
+          logId,
+          userId,
+          entry.invite || 'N/A',
+          'Auto-imported',
+          entry.type,
+          entry.url || null,
+          threadId,
+          msg.id,
+          threadId
+        );
+        ok++;
+        imported++;
+      } catch (e) {
+        console.error('Auto log import entry failed:', e);
+        failed++;
+      }
+    }
+    results.push('<@' + userId + '>: **' + ok + '** imported');
+  }
+
+  autoCmd.pendingJobs.delete(jobId);
+
+  return interaction.editReply({
+    embeds: [
+      baseEmbed()
+        .setColor(imported ? 0x2ECC71 : 0xE74C3C)
+        .setTitle('Auto Log — Done')
+        .setDescription(
+          '**Imported:** ' + imported + '\n**Failed/skipped:** ' + failed + '\n\n' +
+          results.join('\n').slice(0, 3500)
+        )
+    ],
     components: []
   });
 }
