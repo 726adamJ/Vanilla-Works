@@ -56,7 +56,6 @@ module.exports = {
         const { db } = require('../database');
         const now = new Date().toISOString();
 
-        // Expire temp roles — remove only that role
         const expiredRoles = db.prepare(
           'SELECT * FROM temp_roles WHERE expires_at <= ?'
         ).all(now);
@@ -79,7 +78,6 @@ module.exports = {
           console.log('[TempRole] Removed role ' + row.role_id + ' from user ' + row.user_id);
         }
 
-        // Purge expired cooldowns + refresh panel
         const { purgeExpiredCooldowns, refreshCooldownPanel } = require('../utils/cooldownPanel');
         const removed = purgeExpiredCooldowns();
         if (removed > 0) {
@@ -109,7 +107,12 @@ module.exports = {
         const todayKey = now.toISOString().slice(0, 10);
         if (lastSent === todayKey) return;
 
-        const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        let weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        const trackingReset = getConfig('tracking_reset_at');
+        if (trackingReset && trackingReset > weekAgo) {
+          weekAgo = trackingReset;
+        }
+
         const totalLogs = db.prepare('SELECT COUNT(*) as c FROM outreach_logs WHERE created_at >= ?').get(weekAgo)?.c || 0;
         const mutuals = db.prepare("SELECT COUNT(*) as c FROM outreach_logs WHERE type = 'Mutual' AND created_at >= ?").get(weekAgo)?.c || 0;
         const partners = db.prepare("SELECT COUNT(*) as c FROM outreach_logs WHERE type = 'Partner' AND created_at >= ?").get(weekAgo)?.c || 0;
@@ -122,7 +125,7 @@ module.exports = {
 
         const topLines = topStaff.length
           ? topStaff.map((r, i) => (i + 1) + '. <@' + r.user_id + '> — **' + r.c + '**').join('\n')
-          : 'No outreach logged this week.';
+          : 'No outreach logged this period.';
 
         const channel = await client.channels.fetch(channelId).catch(() => null);
         if (!channel) return;
@@ -130,7 +133,13 @@ module.exports = {
         const embed = new EmbedBuilder()
           .setColor(0x000000)
           .setTitle('Weekly PR Activity Report')
-          .setDescription('Summary of department activity for the past 7 days.')
+          .setDescription(
+            'Summary of department activity since ' +
+            (trackingReset && trackingReset > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+              ? 'the last tracking reset'
+              : 'the past 7 days') +
+            '.'
+          )
           .addFields(
             { name: 'Total Outreach Logs', value: String(totalLogs), inline: true },
             { name: 'Mutual Giveaways', value: String(mutuals), inline: true },
